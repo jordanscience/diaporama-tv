@@ -1,4 +1,4 @@
-# 🎬 Mon Diaporama TV
+# 🎬 Clay Diaporama
 
 **➡️ Site en ligne : https://jordanscience.github.io/diaporama-tv/**
 
