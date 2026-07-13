@@ -282,6 +282,7 @@ window.onerror = function (msg, src, line) {
         <button type="submit" class="btn-primary">Se connecter</button>
         <div class="error-msg" id="loginError"></div>
       </form>
+      <button type="button" class="btn-ghost" id="watchBtn" style="width:100%;margin-top:10px;padding:12px">▶ Voir le diaporama sans se connecter</button>
     </div>
   </div>
 </div>
@@ -325,7 +326,7 @@ window.onerror = function (msg, src, line) {
 <div id="player" class="view">
   <img id="playerImg" alt="" style="display:none">
   <video id="playerVideo" playsinline webkit-playsinline style="display:none"></video>
-  <div id="playerHint">Appuyez sur Échap (ou Retour) pour quitter · Clic / OK pour passer au suivant</div>
+  <div id="playerHint">Retour / Échap : quitter et se connecter · OK / clic : plein écran, puis suivant</div>
 </div>
 
 <div id="toast"></div>
@@ -339,7 +340,6 @@ window.onerror = function (msg, src, line) {
 
   const IMAGE_EXT = ["jpg","jpeg","png","gif","webp","avif","bmp","svg"];
   const VIDEO_EXT = ["mp4","webm","ogg","m4v","mov"];
-  const SIGNED_URL_TTL = 60 * 60 * 24 * 7; // 7 jours
 
   function ext(name) { return name.split(".").pop().toLowerCase(); }
   function kindOf(name) {
@@ -419,6 +419,10 @@ window.onerror = function (msg, src, line) {
     refreshMedia();
   }
 
+  function publicUrl(name) {
+    return sb.storage.from(BUCKET).getPublicUrl(name).data.publicUrl;
+  }
+
   // ---------- Liste des médias ----------
   async function listMedia() {
     const { data, error } = await sb.storage.from(BUCKET).list("", {
@@ -438,19 +442,11 @@ window.onerror = function (msg, src, line) {
     const grid = $("mediaGrid");
     grid.innerHTML = "";
 
-    // Miniatures : URLs signées uniquement pour les images
-    const imageNames = items.filter(i => i.kind === "image").map(i => i.name);
-    let signed = {};
-    if (imageNames.length) {
-      const { data } = await sb.storage.from(BUCKET).createSignedUrls(imageNames, 3600);
-      (data || []).forEach(d => { if (d.signedUrl) signed[d.path] = d.signedUrl; });
-    }
-
     for (const item of items) {
       const el = document.createElement("div");
       el.className = "media-item";
-      const thumb = item.kind === "image" && signed[item.name]
-        ? `<img class="thumb" src="${signed[item.name]}" loading="lazy" alt="">`
+      const thumb = item.kind === "image"
+        ? `<img class="thumb" src="${publicUrl(item.name)}" loading="lazy" alt="">`
         : `<div class="thumb video-icon">🎞️</div>`;
       el.innerHTML = `${thumb}
         <div class="name" title="${displayName(item.name)}">${displayName(item.name)}</div>
@@ -510,18 +506,24 @@ window.onerror = function (msg, src, line) {
   const pVid = $("playerVideo");
 
   $("playBtn").addEventListener("click", startPlayback);
+  $("watchBtn").addEventListener("click", startPlayback);
+
+  async function enterFullscreen() {
+    try {
+      const root = document.documentElement;
+      if (root.requestFullscreen) await root.requestFullscreen();
+      else if (root.webkitRequestFullscreen) root.webkitRequestFullscreen();
+    } catch (e) {}
+  }
+  function isFullscreen() {
+    return !!(document.fullscreenElement || document.webkitFullscreenElement);
+  }
 
   async function startPlayback() {
     const items = await listMedia();
     if (!items.length) { toast("Ajoutez d'abord des photos ou des vidéos !"); return; }
 
-    const { data, error } = await sb.storage.from(BUCKET)
-      .createSignedUrls(items.map(i => i.name), SIGNED_URL_TTL);
-    if (error || !data) { toast("Impossible de préparer la lecture."); return; }
-    const urlByName = {};
-    data.forEach(d => { if (d.signedUrl) urlByName[d.path] = d.signedUrl; });
-
-    playlist = items.filter(i => urlByName[i.name]).map(i => ({ ...i, url: urlByName[i.name] }));
+    playlist = items.map(i => ({ ...i, url: publicUrl(i.name) }));
     if (opts.shuffle) shuffleInPlace(playlist);
 
     playing = true;
@@ -530,17 +532,13 @@ window.onerror = function (msg, src, line) {
     $("playerHint").style.opacity = "1";
     setTimeout(() => $("playerHint").style.opacity = "0", 6000);
 
-    try {
-      const root = document.documentElement;
-      if (root.requestFullscreen) await root.requestFullscreen();
-      else if (root.webkitRequestFullscreen) root.webkitRequestFullscreen();
-    } catch (e) {}
+    await enterFullscreen();
     requestWakeLock();
     cacheInBackground();
     nextItem();
   }
 
-  function stopPlayback() {
+  async function stopPlayback() {
     playing = false;
     clearTimeout(imageTimer);
     pVid.pause();
@@ -554,7 +552,10 @@ window.onerror = function (msg, src, line) {
     } catch (e) {}
     for (const url of blobCache.values()) URL.revokeObjectURL(url);
     blobCache.clear();
-    enterHome();
+    // Retour / Échap : on montre la gestion si connecté, sinon l'écran de connexion
+    const { data: { session } } = await sb.auth.getSession();
+    if (session) enterHome();
+    else showView("view-login");
   }
 
   function nextItem() {
@@ -614,9 +615,10 @@ window.onerror = function (msg, src, line) {
       if (!playing) return;
       if (blobCache.has(item.name) || !item.size || used + item.size > limit) continue;
       try {
-        const { data, error } = await sb.storage.from(BUCKET).download(item.name);
-        if (!error && data && playing) {
-          blobCache.set(item.name, URL.createObjectURL(data));
+        const resp = await fetch(item.url);
+        if (resp.ok && playing) {
+          const blob = await resp.blob();
+          blobCache.set(item.name, URL.createObjectURL(blob));
           used += item.size;
         }
       } catch (e) {}
@@ -637,12 +639,20 @@ window.onerror = function (msg, src, line) {
   document.addEventListener("webkitfullscreenchange", () => {
     if (!document.webkitFullscreenElement && playing) stopPlayback();
   });
-  // Clic / touche OK de la télécommande = média suivant
-  $("player").addEventListener("click", () => { if (playing) nextItem(); });
+  // Clic / touche OK : d'abord passer en plein écran (geste requis), ensuite média suivant
+  $("player").addEventListener("click", () => {
+    if (!playing) return;
+    if (!isFullscreen()) enterFullscreen();
+    else nextItem();
+  });
   document.addEventListener("keydown", e => {
     if (!playing) return;
     const code = e.keyCode;
-    if (e.key === "ArrowRight" || e.key === "Enter" || code === 39 || code === 13) nextItem();
+    if (e.key === "ArrowRight" || code === 39) nextItem();
+    else if (e.key === "Enter" || code === 13) {
+      if (!isFullscreen()) enterFullscreen();
+      else nextItem();
+    }
     // Échap, Backspace, et touche Retour des télécommandes (461 = LG webOS, 10009 = Samsung Tizen)
     if (e.key === "Escape" || e.key === "Backspace" || code === 461 || code === 10009) {
       e.preventDefault();
@@ -653,7 +663,10 @@ window.onerror = function (msg, src, line) {
   // ---------- Démarrage ----------
   (async () => {
     const { data: { session } } = await sb.auth.getSession();
-    if (session) enterHome();
+    if (session) { enterHome(); return; }
+    // Visiteur non connecté : le diaporama démarre tout seul
+    const items = await listMedia();
+    if (items.length) startPlayback();
     else showView("view-login");
   })();
 })();
