@@ -1,5 +1,7 @@
 # 🎬 Mon Diaporama TV
 
+**➡️ Site en ligne : https://jordanscience.github.io/diaporama-tv/**
+
 Un site ultra-simple pour faire défiler **vos photos et vidéos en plein écran sur votre télé**, en boucle, pendant 24 h (ou plus).
 
 - Connexion par e-mail + mot de passe
