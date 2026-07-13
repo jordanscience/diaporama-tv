@@ -4,6 +4,24 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Mon Diaporama TV</title>
+<script>
+// Affiche les erreurs à l'écran (indispensable sur une télé, sans console)
+window.onerror = function (msg, src, line) {
+  try {
+    var d = document.getElementById("jsErrorBanner");
+    if (!d) {
+      d = document.createElement("div");
+      d.id = "jsErrorBanner";
+      d.style.cssText = "position:fixed;top:0;left:0;right:0;background:#b91c1c;color:#fff;padding:10px 16px;font:14px sans-serif;z-index:9999;white-space:pre-wrap;";
+      if (document.body) { document.body.appendChild(d); }
+      else {
+        document.addEventListener("DOMContentLoaded", function () { document.body.appendChild(d); });
+      }
+    }
+    d.textContent = "Erreur : " + msg + " (ligne " + line + ")";
+  } catch (e) {}
+};
+</script>
 <style>
   :root {
     --bg: #0d1117;
@@ -251,7 +269,7 @@
 </div>
 
 <!-- Vue : connexion -->
-<div id="view-login" class="view">
+<div id="view-login" class="view active">
   <div class="center-wrap">
     <div class="card">
       <h1>🎬 Mon Diaporama TV</h1>
@@ -306,13 +324,13 @@
 <!-- Vue : lecteur -->
 <div id="player" class="view">
   <img id="playerImg" alt="" style="display:none">
-  <video id="playerVideo" playsinline style="display:none"></video>
+  <video id="playerVideo" playsinline webkit-playsinline style="display:none"></video>
   <div id="playerHint">Appuyez sur Échap (ou Retour) pour quitter · Clic / OK pour passer au suivant</div>
 </div>
 
 <div id="toast"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="supabase.min.js"></script>
 <script src="config.js"></script>
 <script>
 (() => {
@@ -352,6 +370,9 @@
     return;
   }
 
+  if (typeof supabase === "undefined") {
+    throw new Error("Le module de connexion (supabase.min.js) n'a pas pu être chargé.");
+  }
   const sb = supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey);
   const BUCKET = CFG.bucket || "media";
 
@@ -407,7 +428,7 @@
     if (error) { toast("Erreur de lecture du stockage : " + error.message); return []; }
     return (data || [])
       .filter(f => f.name && kindOf(f.name))
-      .map(f => ({ name: f.name, kind: kindOf(f.name), size: f.metadata?.size || 0 }));
+      .map(f => ({ name: f.name, kind: kindOf(f.name), size: (f.metadata && f.metadata.size) || 0 }));
   }
 
   async function refreshMedia() {
@@ -509,7 +530,11 @@
     $("playerHint").style.opacity = "1";
     setTimeout(() => $("playerHint").style.opacity = "0", 6000);
 
-    try { await document.documentElement.requestFullscreen(); } catch {}
+    try {
+      const root = document.documentElement;
+      if (root.requestFullscreen) await root.requestFullscreen();
+      else if (root.webkitRequestFullscreen) root.webkitRequestFullscreen();
+    } catch (e) {}
     requestWakeLock();
     cacheInBackground();
     nextItem();
@@ -523,7 +548,10 @@
     pVid.load();
     pImg.removeAttribute("src");
     if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
-    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    try {
+      if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
+      else if (document.webkitFullscreenElement && document.webkitExitFullscreen) document.webkitExitFullscreen();
+    } catch (e) {}
     for (const url of blobCache.values()) URL.revokeObjectURL(url);
     blobCache.clear();
     enterHome();
@@ -591,12 +619,12 @@
           blobCache.set(item.name, URL.createObjectURL(data));
           used += item.size;
         }
-      } catch {}
+      } catch (e) {}
     }
   }
 
   async function requestWakeLock() {
-    try { wakeLock = await navigator.wakeLock.request("screen"); } catch {}
+    try { if (navigator.wakeLock) wakeLock = await navigator.wakeLock.request("screen"); } catch (e) {}
   }
   document.addEventListener("visibilitychange", () => {
     if (playing && document.visibilityState === "visible") requestWakeLock();
@@ -606,12 +634,20 @@
   document.addEventListener("fullscreenchange", () => {
     if (!document.fullscreenElement && playing) stopPlayback();
   });
+  document.addEventListener("webkitfullscreenchange", () => {
+    if (!document.webkitFullscreenElement && playing) stopPlayback();
+  });
   // Clic / touche OK de la télécommande = média suivant
   $("player").addEventListener("click", () => { if (playing) nextItem(); });
   document.addEventListener("keydown", e => {
     if (!playing) return;
-    if (e.key === "ArrowRight" || e.key === "Enter") nextItem();
-    if (e.key === "Escape" || e.key === "Backspace") stopPlayback();
+    const code = e.keyCode;
+    if (e.key === "ArrowRight" || e.key === "Enter" || code === 39 || code === 13) nextItem();
+    // Échap, Backspace, et touche Retour des télécommandes (461 = LG webOS, 10009 = Samsung Tizen)
+    if (e.key === "Escape" || e.key === "Backspace" || code === 461 || code === 10009) {
+      e.preventDefault();
+      stopPlayback();
+    }
   });
 
   // ---------- Démarrage ----------
