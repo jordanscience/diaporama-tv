@@ -6,8 +6,18 @@ Un site ultra-simple pour faire défiler **vos photos et vidéos en plein écran
 
 - Connexion par e-mail + mot de passe
 - Upload de photos et vidéos (glisser-déposer)
+- **Choix des médias à diffuser, de leur ordre (↑ ↓) et de la durée de chaque photo**
 - Un seul gros bouton **▶ LECTURE** → diaporama plein écran en boucle
 - 100 % gratuit (Supabase pour le stockage + hébergement statique gratuit)
+
+### Composer le diaporama
+
+Une fois connecté, la page de gestion a deux parties :
+
+- **🎞️ Dans le diaporama** : la liste ordonnée des médias qui défilent. Boutons ↑ ↓ pour changer l'ordre, champ « s » pour régler la durée d'une photo (vide = durée par défaut), ✕ pour la retirer.
+- **📁 Ma bibliothèque** : tous vos fichiers envoyés. Bouton **＋ Ajouter** pour en mettre un dans le diaporama, ✕ pour le supprimer définitivement.
+
+Tout est **enregistré automatiquement** (dans un fichier `playlist.json` sur Supabase) et **partagé avec la télé** : configurez depuis le PC, la télé lira exactement cette sélection. Si vous ne sélectionnez rien, le diaporama lit **toute** la bibliothèque.
 
 ---
 

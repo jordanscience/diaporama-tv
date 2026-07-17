@@ -202,6 +202,101 @@ window.onerror = function (msg, src, line) {
   .media-item .del:hover { background: var(--danger); }
   .empty-note { color: var(--muted); padding: 20px 0; }
 
+  .media-item .add {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    background: rgba(47,129,247,.9);
+    color: #fff;
+    height: 30px;
+    padding: 0 12px;
+    border-radius: 15px;
+    font-size: .8rem;
+    line-height: 30px;
+  }
+  .media-item .add:hover { filter: brightness(1.1); }
+  .media-item .in-badge {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    background: rgba(35,134,54,.92);
+    color: #fff;
+    height: 30px;
+    padding: 0 12px;
+    border-radius: 15px;
+    font-size: .8rem;
+    line-height: 30px;
+    font-weight: 600;
+  }
+
+  /* ---------- Liste ordonnée du diaporama ---------- */
+  .pl-hint { color: var(--muted); font-size: .9rem; margin-bottom: 14px; }
+  #plSaveStatus { color: var(--accent); font-size: .85rem; margin-left: 10px; font-weight: 500; }
+  .pl-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px; }
+  .pl-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 8px 12px;
+  }
+  .pl-pos {
+    flex: 0 0 26px;
+    text-align: center;
+    color: var(--muted);
+    font-weight: 700;
+    font-size: .95rem;
+  }
+  .pl-thumb {
+    flex: 0 0 auto;
+    width: 68px;
+    height: 44px;
+    object-fit: cover;
+    border-radius: 6px;
+    background: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.4rem;
+  }
+  .pl-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: .9rem;
+  }
+  .pl-dur-wrap { flex: 0 0 auto; color: var(--muted); font-size: .85rem; white-space: nowrap; }
+  .pl-dur {
+    width: 66px;
+    padding: 7px 8px;
+    border-radius: 7px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    font-size: .9rem;
+  }
+  .pl-vidnote { font-style: italic; }
+  .pl-btn {
+    flex: 0 0 auto;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    width: 38px;
+    height: 38px;
+    border-radius: 8px;
+    font-size: 1.05rem;
+  }
+  .pl-btn:hover:not(:disabled) { border-color: var(--muted); }
+  .pl-btn:disabled { opacity: .3; cursor: default; }
+  .pl-btn.rm:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
+  @media (max-width: 560px) {
+    .pl-name { flex-basis: 100%; order: 5; }
+  }
+
   /* ---------- Lecteur plein écran ---------- */
   #player {
     position: fixed;
@@ -301,14 +396,21 @@ window.onerror = function (msg, src, line) {
     </button>
 
     <div class="options-row">
-      <label>Durée des photos :
+      <label>Durée par défaut des photos :
         <input type="number" id="optSeconds" min="2" max="120" step="1"> s
       </label>
       <label><input type="checkbox" id="optShuffle"> Ordre aléatoire</label>
       <label><input type="checkbox" id="optSound"> Son des vidéos</label>
     </div>
 
-    <h2>📁 Mes photos et vidéos <span id="mediaCount" style="color:var(--muted);font-weight:400"></span></h2>
+    <h2>🎞️ Dans le diaporama <span id="plCount" style="color:var(--muted);font-weight:400"></span><span id="plSaveStatus"></span></h2>
+    <p class="pl-hint">Ces médias défilent, dans cet ordre. Utilisez ↑ ↓ pour réordonner, et le champ « s » pour régler la durée d'une photo (laissé vide = durée par défaut).</p>
+    <p class="empty-note" id="plEmpty" style="display:none">
+      Aucun média sélectionné : le diaporama lira <strong>toute</strong> la bibliothèque. Cliquez « ＋ Ajouter » sur les médias voulus pour choisir et ordonner.
+    </p>
+    <div class="pl-list" id="playlistList"></div>
+
+    <h2 style="margin-top:42px">📁 Ma bibliothèque <span id="mediaCount" style="color:var(--muted);font-weight:400"></span></h2>
     <div class="upload-zone" id="uploadZone">
       <strong>Cliquez ici</strong> ou glissez-déposez vos photos et vidéos<br>
       <span style="font-size:.85rem">(JPG, PNG, GIF, WebP, MP4, WebM…)</span>
@@ -340,6 +442,11 @@ window.onerror = function (msg, src, line) {
 
   const IMAGE_EXT = ["jpg","jpeg","png","gif","webp","avif","bmp","svg"];
   const VIDEO_EXT = ["mp4","webm","ogg","m4v","mov"];
+  const PLAYLIST_FILE = "playlist.json";
+
+  // État de la gestion : plItems = sélection ordonnée [{name, seconds?}], library = tous les médias
+  let plItems = [];
+  let library = [];
 
   function ext(name) { return name.split(".").pop().toLowerCase(); }
   function kindOf(name) {
@@ -416,12 +523,54 @@ window.onerror = function (msg, src, line) {
     const { data: { user } } = await sb.auth.getUser();
     $("whoami").textContent = user ? user.email : "";
     showView("view-home");
-    refreshMedia();
+    plItems = await loadPlaylistConfig();
+    renderManage();
   }
 
   function publicUrl(name) {
     return sb.storage.from(BUCKET).getPublicUrl(name).data.publicUrl;
   }
+
+  // ---------- Configuration du diaporama (playlist.json) ----------
+  // Lecture publique (cache-bust pour toujours avoir la dernière version, y compris sur la télé)
+  async function loadPlaylistConfig() {
+    try {
+      const resp = await fetch(publicUrl(PLAYLIST_FILE) + "?t=" + Date.now());
+      if (!resp.ok) return [];
+      const data = await resp.json();
+      if (data && Array.isArray(data.items)) {
+        return data.items
+          .filter(it => it && typeof it.name === "string")
+          .map(it => {
+            const o = { name: it.name };
+            const s = Number(it.seconds);
+            if (s > 0) o.seconds = s;
+            return o;
+          });
+      }
+    } catch (e) {}
+    return [];
+  }
+
+  let saveTimer;
+  function scheduleSave() {
+    $("plSaveStatus").textContent = "Enregistrement…";
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(doSavePlaylist, 500);
+  }
+  async function doSavePlaylist() {
+    const body = new Blob([JSON.stringify({ items: plItems })], { type: "application/json" });
+    const { error } = await sb.storage.from(BUCKET).upload(PLAYLIST_FILE, body, {
+      upsert: true,
+      contentType: "application/json",
+      cacheControl: "0",
+    });
+    const st = $("plSaveStatus");
+    st.textContent = error ? "⚠️ Échec de l'enregistrement" : "✅ Enregistré";
+    setTimeout(() => { if (st.textContent.startsWith("✅")) st.textContent = ""; }, 2500);
+  }
+
+  function inPlaylist(name) { return plItems.some(it => it.name === name); }
 
   // ---------- Liste des médias ----------
   async function listMedia() {
@@ -436,26 +585,106 @@ window.onerror = function (msg, src, line) {
   }
 
   async function refreshMedia() {
-    const items = await listMedia();
-    $("mediaCount").textContent = items.length ? `(${items.length})` : "";
-    $("emptyNote").style.display = items.length ? "none" : "block";
+    library = await listMedia();
+    // Retire de la sélection les fichiers qui n'existent plus
+    const names = new Set(library.map(m => m.name));
+    const before = plItems.length;
+    plItems = plItems.filter(it => names.has(it.name));
+    if (plItems.length !== before) scheduleSave();
+    renderPlaylist();
+    renderLibrary();
+  }
+
+  function renderManage() { refreshMedia(); }
+
+  function moveItem(idx, dir) {
+    const j = idx + dir;
+    if (j < 0 || j >= plItems.length) return;
+    const tmp = plItems[idx]; plItems[idx] = plItems[j]; plItems[j] = tmp;
+    scheduleSave();
+    renderPlaylist();
+  }
+
+  function renderPlaylist() {
+    const list = $("playlistList");
+    list.innerHTML = "";
+    $("plCount").textContent = plItems.length ? `(${plItems.length})` : "";
+    $("plEmpty").style.display = plItems.length ? "none" : "block";
+
+    plItems.forEach((it, idx) => {
+      const media = library.find(m => m.name === it.name);
+      if (!media) return;
+      const row = document.createElement("div");
+      row.className = "pl-row";
+      const thumb = media.kind === "image"
+        ? `<img class="pl-thumb" src="${publicUrl(it.name)}" loading="lazy" alt="">`
+        : `<div class="pl-thumb">🎞️</div>`;
+      const dur = media.kind === "image"
+        ? `<input type="number" class="pl-dur" min="1" max="600" step="1" placeholder="${opts.seconds}" value="${it.seconds || ""}"> s`
+        : `<span class="pl-vidnote">vidéo entière</span>`;
+      row.innerHTML = `
+        <span class="pl-pos">${idx + 1}</span>
+        ${thumb}
+        <span class="pl-name" title="${displayName(it.name)}">${displayName(it.name)}</span>
+        <span class="pl-dur-wrap">${dur}</span>
+        <button class="pl-btn up" title="Monter" ${idx === 0 ? "disabled" : ""}>↑</button>
+        <button class="pl-btn down" title="Descendre" ${idx === plItems.length - 1 ? "disabled" : ""}>↓</button>
+        <button class="pl-btn rm" title="Retirer du diaporama">✕</button>`;
+      const up = row.querySelector(".up");
+      const down = row.querySelector(".down");
+      if (up) up.addEventListener("click", () => moveItem(idx, -1));
+      if (down) down.addEventListener("click", () => moveItem(idx, 1));
+      row.querySelector(".rm").addEventListener("click", () => {
+        plItems.splice(idx, 1);
+        scheduleSave();
+        renderPlaylist();
+        renderLibrary();
+      });
+      const durInput = row.querySelector(".pl-dur");
+      if (durInput) durInput.addEventListener("change", () => {
+        const v = Math.max(1, Math.floor(Number(durInput.value)));
+        if (!durInput.value || !(v > 0)) { delete it.seconds; durInput.value = ""; }
+        else it.seconds = v;
+        scheduleSave();
+      });
+      list.appendChild(row);
+    });
+  }
+
+  function renderLibrary() {
+    $("mediaCount").textContent = library.length ? `(${library.length})` : "";
+    $("emptyNote").style.display = library.length ? "none" : "block";
     const grid = $("mediaGrid");
     grid.innerHTML = "";
 
-    for (const item of items) {
+    for (const item of library) {
       const el = document.createElement("div");
       el.className = "media-item";
       const thumb = item.kind === "image"
         ? `<img class="thumb" src="${publicUrl(item.name)}" loading="lazy" alt="">`
         : `<div class="thumb video-icon">🎞️</div>`;
+      const added = inPlaylist(item.name);
+      const topLeft = added
+        ? `<span class="in-badge">✓ Dans le diaporama</span>`
+        : `<button class="add" title="Ajouter au diaporama">＋ Ajouter</button>`;
       el.innerHTML = `${thumb}
+        ${topLeft}
         <div class="name" title="${displayName(item.name)}">${displayName(item.name)}</div>
-        <button class="del" title="Supprimer">✕</button>`;
+        <button class="del" title="Supprimer définitivement">✕</button>`;
+      const addBtn = el.querySelector(".add");
+      if (addBtn) addBtn.addEventListener("click", () => {
+        plItems.push({ name: item.name });
+        scheduleSave();
+        renderPlaylist();
+        renderLibrary();
+      });
       el.querySelector(".del").addEventListener("click", async () => {
-        if (!confirm(`Supprimer « ${displayName(item.name)} » ?`)) return;
+        if (!confirm(`Supprimer définitivement « ${displayName(item.name)} » du stockage ?`)) return;
         const { error } = await sb.storage.from(BUCKET).remove([item.name]);
-        if (error) toast("Suppression impossible : " + error.message);
-        else refreshMedia();
+        if (error) { toast("Suppression impossible : " + error.message); return; }
+        plItems = plItems.filter(it => it.name !== item.name);
+        scheduleSave();
+        refreshMedia();
       });
       grid.appendChild(el);
     }
@@ -519,11 +748,23 @@ window.onerror = function (msg, src, line) {
     return !!(document.fullscreenElement || document.webkitFullscreenElement);
   }
 
-  async function startPlayback() {
-    const items = await listMedia();
-    if (!items.length) { toast("Ajoutez d'abord des photos ou des vidéos !"); return; }
+  // Construit la liste à lire : la sélection ordonnée si elle existe, sinon toute la bibliothèque
+  async function buildPlaylist() {
+    const media = await listMedia();
+    if (!media.length) return [];
+    const byName = new Map(media.map(m => [m.name, m]));
+    const cfg = await loadPlaylistConfig();
+    const selected = cfg
+      .filter(c => byName.has(c.name))
+      .map(c => ({ ...byName.get(c.name), url: publicUrl(c.name), seconds: c.seconds || null }));
+    if (selected.length) return selected;
+    // Repli : aucune sélection => on lit tout
+    return media.map(m => ({ ...m, url: publicUrl(m.name), seconds: null }));
+  }
 
-    playlist = items.map(i => ({ ...i, url: publicUrl(i.name) }));
+  async function startPlayback() {
+    playlist = await buildPlaylist();
+    if (!playlist.length) { toast("Ajoutez d'abord des photos ou des vidéos !"); return; }
     if (opts.shuffle) shuffleInPlace(playlist);
 
     playing = true;
@@ -577,7 +818,8 @@ window.onerror = function (msg, src, line) {
       pImg.src = url;
       pImg.style.display = "block";
       preloadNextImage();
-      imageTimer = setTimeout(nextItem, opts.seconds * 1000);
+      const secs = (item.seconds && item.seconds > 0) ? item.seconds : opts.seconds;
+      imageTimer = setTimeout(nextItem, secs * 1000);
     } else {
       pImg.style.display = "none";
       pVid.style.display = "block";
@@ -665,7 +907,7 @@ window.onerror = function (msg, src, line) {
     const { data: { session } } = await sb.auth.getSession();
     if (session) { enterHome(); return; }
     // Visiteur non connecté : le diaporama démarre tout seul
-    const items = await listMedia();
+    const items = await buildPlaylist();
     if (items.length) startPlayback();
     else showView("view-login");
   })();
