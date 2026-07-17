@@ -304,6 +304,7 @@ window.onerror = function (msg, src, line) {
     background: #000;
     z-index: 100;
     cursor: none;
+    touch-action: manipulation; /* pas de zoom au double-tap sur mobile */
   }
   #player img, #player video {
     position: absolute;
@@ -428,7 +429,7 @@ window.onerror = function (msg, src, line) {
 <div id="player" class="view">
   <img id="playerImg" alt="" style="display:none">
   <video id="playerVideo" playsinline webkit-playsinline style="display:none"></video>
-  <div id="playerHint">Retour / Échap : quitter et se connecter · OK / clic : plein écran, puis suivant</div>
+  <div id="playerHint">Double-clic / double-tap (ou Retour / Échap) : revenir au menu · Clic simple / OK : plein écran, puis image suivante</div>
 </div>
 
 <div id="toast"></div>
@@ -747,6 +748,11 @@ window.onerror = function (msg, src, line) {
   function isFullscreen() {
     return !!(document.fullscreenElement || document.webkitFullscreenElement);
   }
+  function canFullscreen() {
+    const r = document.documentElement;
+    // Faux sur iPhone (Safari ne permet pas le plein écran de page) : le tap avancera alors directement
+    return !!(r.requestFullscreen || r.webkitRequestFullscreen);
+  }
 
   // Construit la liste à lire : la sélection ordonnée si elle existe, sinon toute la bibliothèque
   async function buildPlaylist() {
@@ -770,8 +776,7 @@ window.onerror = function (msg, src, line) {
     playing = true;
     playIdx = -1;
     showView("player");
-    $("playerHint").style.opacity = "1";
-    setTimeout(() => $("playerHint").style.opacity = "0", 6000);
+    flashHint(6000);
 
     await enterFullscreen();
     requestWakeLock();
@@ -881,18 +886,42 @@ window.onerror = function (msg, src, line) {
   document.addEventListener("webkitfullscreenchange", () => {
     if (!document.webkitFullscreenElement && playing) stopPlayback();
   });
-  // Clic / touche OK : d'abord passer en plein écran (geste requis), ensuite média suivant
+  // Aide à l'écran (réapparaît à chaque interaction, utile sur mobile)
+  let hintTimer = null;
+  function flashHint(ms) {
+    const h = $("playerHint");
+    h.style.opacity = "1";
+    clearTimeout(hintTimer);
+    hintTimer = setTimeout(() => { h.style.opacity = "0"; }, ms || 4000);
+  }
+
+  // Clic / tap : simple = plein écran puis image suivante ; double = revenir au menu.
+  // Le double-clic/double-tap est le seul moyen de sortir sur mobile (pas de touche Échap).
+  let lastTap = 0, tapTimer = null;
   $("player").addEventListener("click", () => {
     if (!playing) return;
-    if (!isFullscreen()) enterFullscreen();
-    else nextItem();
+    const now = Date.now();
+    if (now - lastTap < 400) {
+      // Double : on annule l'action simple en attente et on sort
+      clearTimeout(tapTimer);
+      lastTap = 0;
+      stopPlayback();
+      return;
+    }
+    lastTap = now;
+    clearTimeout(tapTimer);
+    tapTimer = setTimeout(() => {
+      flashHint();
+      if (canFullscreen() && !isFullscreen()) enterFullscreen();
+      else nextItem();
+    }, 400);
   });
   document.addEventListener("keydown", e => {
     if (!playing) return;
     const code = e.keyCode;
     if (e.key === "ArrowRight" || code === 39) nextItem();
     else if (e.key === "Enter" || code === 13) {
-      if (!isFullscreen()) enterFullscreen();
+      if (canFullscreen() && !isFullscreen()) enterFullscreen();
       else nextItem();
     }
     // Échap, Backspace, et touche Retour des télécommandes (461 = LG webOS, 10009 = Samsung Tizen)
