@@ -84,6 +84,24 @@ Le site est composé de 2 fichiers statiques (`index.html` + `config.js`). N'imp
 - **Taille des fichiers** : le plan gratuit Supabase offre **1 Go de stockage** et **5 Go de transfert/mois**. Le site met les fichiers en cache pendant la lecture pour ne pas les re-télécharger à chaque boucle, mais restez raisonnable sur le poids des vidéos (idéalement < 100 Mo chacune).
 - Le son des vidéos est **coupé par défaut** (les navigateurs de télé l'exigent souvent) : cochez « Son des vidéos » avant de lancer la lecture si vous le voulez.
 
+## Étape 5 — Empêcher la mise en pause de Supabase (automatique)
+
+Sur le plan gratuit, **Supabase met le projet en pause après 7 jours sans activité** (le site affiche alors des erreurs jusqu'à ce qu'on le réactive à la main). Un robot GitHub Actions envoie donc une requête **tous les jours** pour que ça n'arrive jamais.
+
+C'est déjà en place dans le dépôt (`.github/workflows/keepalive.yml`). Il reste **une seule chose à faire une fois** :
+
+1. Supabase → **SQL Editor** → **New query** → collez le contenu de **`keepalive.sql`** → **Run**.
+2. GitHub → onglet **Actions** du dépôt → si un bandeau demande d'activer les workflows, cliquez **I understand… enable them**.
+3. Pour vérifier tout de suite : **Actions** → *Garder Supabase actif* → **Run workflow**. Les 3 lignes doivent afficher `HTTP 200`.
+
+**À savoir :**
+
+- Le robot tourne à 06:17 UTC (≈ 08:17 à Paris). Pour espacer davantage, remplacez le cron par `17 6 */6 * *` (tous les 6 jours) dans `keepalive.yml`.
+- GitHub désactive les tâches planifiées après **60 jours sans activité sur le dépôt** : le workflow fait donc un mini-commit le 1er de chaque mois pour l'éviter (penser à `git pull` avant de travailler en local).
+- Si le projet est déjà en pause, le ping ne le réveille pas : il faut le relancer une fois depuis le dashboard Supabase (**Restore project**), ensuite le robot le maintient éveillé.
+
+---
+
 ## Tester sur l'ordinateur avant
 
 Ouvrez simplement `index.html` dans votre navigateur (double-clic), ou lancez un petit serveur local :

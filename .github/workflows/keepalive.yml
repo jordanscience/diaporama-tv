@@ -1,0 +1,72 @@
+# ============================================================
+# Anti-mise-en-veille Supabase
+# ------------------------------------------------------------
+# Le plan gratuit Supabase met le projet EN PAUSE apres 7 jours
+# sans aucune activite. Ce job envoie une vraie requete SQL
+# chaque jour : le compteur ne depasse donc jamais 1 jour.
+#
+# (Tous les jours plutot que tous les 6 : si un run echoue ou
+#  est retarde, il reste 6 jours de marge. C'est gratuit.
+#  Pour espacer : "17 6 */6 * *" dans le cron ci-dessous.)
+#
+# Prerequis : avoir lance UNE FOIS le fichier keepalive.sql
+# dans Supabase > SQL Editor.
+# ============================================================
+name: Garder Supabase actif
+
+on:
+  schedule:
+    # tous les jours a 06:17 UTC (~08:17 a Paris en ete)
+    - cron: "17 6 * * *"
+  workflow_dispatch: {} # bouton "Run workflow" pour tester a la main
+
+permissions:
+  contents: write # pour le mini-commit mensuel qui garde le depot actif
+
+env:
+  # Memes valeurs que config.js (cle publique "anon", deja publique)
+  SUPABASE_URL: "https://wbbqnrynpbrakihnqxtz.supabase.co"
+  SUPABASE_ANON_KEY: "sb_publishable_ihlHNtrc3a_xnmmRN4lAYA_rkI1Emhu"
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Le projet repond-il ?
+        run: |
+          code=$(curl -sS -m 30 -o /dev/null -w '%{http_code}' -H "apikey: $SUPABASE_ANON_KEY" "$SUPABASE_URL/auth/v1/health")
+          echo "auth /health -> HTTP $code"
+          if [ "$code" != "200" ]; then
+            echo "::error::Supabase ne repond pas (projet deja en pause ?). Le relancer depuis le dashboard."
+            exit 1
+          fi
+
+      - name: Requete SQL reelle (fonction keepalive)
+        run: |
+          code=$(curl -sS -m 30 -o /tmp/rpc.out -w '%{http_code}' -X POST -H "apikey: $SUPABASE_ANON_KEY" -H "Authorization: Bearer $SUPABASE_ANON_KEY" -H "Content-Type: application/json" -d '{}' "$SUPABASE_URL/rest/v1/rpc/keepalive")
+          echo "RPC keepalive -> HTTP $code"
+          head -c 300 /tmp/rpc.out; echo
+          if [ "$code" != "200" ]; then
+            echo "::error::Fonction keepalive() absente : lancer keepalive.sql dans Supabase > SQL Editor (une seule fois)."
+            exit 1
+          fi
+
+  # GitHub desactive les taches planifiees apres 60 jours sans
+  # activite sur le depot : ce mini-commit mensuel evite ca.
+  garder-le-depot-actif:
+    runs-on: ubuntu-latest
+    needs: ping
+    if: github.event_name == 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          if [ "$(date -u +%d)" != "01" ]; then
+            echo "Pas le 1er du mois -> rien a faire."
+            exit 0
+          fi
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > .github/dernier-ping.txt
+          git config user.name "keepalive bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/dernier-ping.txt
+          git commit -m "keepalive: depot actif $(cat .github/dernier-ping.txt)" || exit 0
+          git push
